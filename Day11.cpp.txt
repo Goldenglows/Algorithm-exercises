@@ -1,0 +1,30 @@
+#include <vector>
+#include <algorithm>
+
+class Solution {
+public:
+    int maxSatisfied(vector<int>& customers, vector<int>& grumpy, int minutes) {
+        
+        int custsum = 0;
+        int maxsum = 0;
+        int windowsum = 0;
+
+        for(int i = 0; i < customers.size(); ++i){
+            if(grumpy[i] == 0){
+                custsum += customers[i]; 
+            }else{
+                //如果老板生气了，先把这个数值存放在这里面，相当于加新数值
+                windowsum += customers[i];
+            }
+            //当出现窗口大小
+            if(i >= minutes)
+                //生气时额外的数值，减去左边界的数值
+                windowsum -=  grumpy[i - minutes] * customers[i - minutes];
+            //如果原来的数值大就保留
+            maxsum =  max(maxsum, windowsum);
+        }
+        //没生气的+技巧额外的
+        return custsum + maxsum;
+
+    }
+};
