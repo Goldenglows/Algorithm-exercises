@@ -1,0 +1,35 @@
+public class SnapshotArray {
+    private int length;
+    private List <int[]> snapshots;
+    private int[] currentSnapshot;
+    private int snapCount = 0; 
+
+    public SnapshotArray(int length) {
+        this.length = length;
+        snapshots = new List<int[]>();
+        currentSnapshot = new int[length];
+    }
+    
+    public void Set(int index, int val) {
+        currentSnapshot[index] = val;
+    }
+
+
+    public int Snap() {
+        snapshots.Add((int[])currentSnapshot.Clone());
+        return snapCount++;
+    }
+
+    public int Get(int index, int snap_id) {
+        if(snap_id >= snapshots.Count)
+            return 0;
+        return snapshots[snap_id][index];
+    }
+}
+
+/**
+ * Your SnapshotArray object will be instantiated and called as such:
+ * SnapshotArray obj = new SnapshotArray(length);
+ * obj.Set(index,val);
+ * int param_2 = obj.Snap();
+ * int param_3 = obj.Get(index,snap_id);
