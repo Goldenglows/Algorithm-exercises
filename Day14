@@ -1,0 +1,16 @@
+public class Solution {
+    public int[] FindColumnWidth(int[][] grid) {
+        int rows = grid.Length;
+        int cols = grid[0].Length;
+
+        int[] maxLengths = new int[cols];
+
+        for(int j = 0; j < cols; j ++){
+            for(int i = 0; i < rows;  i++){
+                int length = grid[i][j].ToString().Length;
+                maxLengths[j] = Math.Max(maxLengths[j], length);
+            }
+        }
+         return maxLengths;
+    }
+}
