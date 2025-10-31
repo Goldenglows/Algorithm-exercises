@@ -1,0 +1,34 @@
+#include <vector>
+#include <string>
+#include <unordered_map>
+#include <algorithm>
+using namespace std;
+
+class Solution {
+public:
+    // 预处理 t
+    void preprocess(const string& t, unordered_map<char, vector<int>>& pos) {
+        pos.clear();
+        for (int i = 0; i < t.size(); ++i) {
+            pos[t[i]].push_back(i);
+        }
+    }
+
+    // 检查 s 是否是 t 的子序列（使用预处理 + 二分）
+    bool isSubsequence(const string& s, const string& t,
+                       const unordered_map<char, vector<int>>& pos) {
+        int prev = -1;  // 上一个匹配的位置
+        for (char c : s) {
+            auto it = pos.find(c);
+            if (it == pos.end()) return false;
+
+            // 二分找 >= prev+1 的最小位置
+            auto& indices = it->second;
+            auto iter = lower_bound(indices.begin(), indices.end(), prev + 1);
+            if (iter == indices.end()) return false;
+
+            prev = *iter;
+        }
+        return true;
+    }
+};
