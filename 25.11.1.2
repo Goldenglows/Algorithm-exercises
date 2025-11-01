@@ -1,0 +1,16 @@
+class Solution {
+public:
+    TreeNode* invertTree(TreeNode* root) {
+        // 终止条件：空节点直接返回
+        if (root == nullptr) return root;
+        
+        // 交换左右子树
+        swap(root->left, root->right);
+        
+        // 递归翻转左子树和右子树
+        invertTree(root->left);
+        invertTree(root->right);
+        
+        return root;
+    }
+};
