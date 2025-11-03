@@ -1,0 +1,69 @@
+class Solution {
+public:
+    vector<int> postorderTraversal(TreeNode* root) {
+        vector<int> result;
+        postorder(root, result);
+        return result;
+    }
+private:
+    void postorder(TreeNode* node, vector<int>& res) {
+        if (!node) return;
+        postorder(node->left, res);
+        postorder(node->right, res);
+        res.push_back(node->val);
+    }
+};
+class Solution {
+public:
+    vector<int> postorderTraversal(TreeNode* root) {
+        vector<int> result;
+        if (!root) return result;
+        
+        stack<TreeNode*> s1, s2;
+        s1.push(root);
+        
+        while (!s1.empty()) {
+            TreeNode* node = s1.top(); s1.pop();
+            s2.push(node);
+            
+            if (node->left)  s1.push(node->left);
+            if (node->right) s1.push(node->right);
+        }
+        
+        while (!s2.empty()) {
+            result.push_back(s2.top()->val);
+            s2.pop();
+        }
+        return result;
+    }
+};
+class Solution {
+public:
+    vector<int> postorderTraversal(TreeNode* root) {
+        vector<int> result;
+        if (!root) return result;
+        
+        stack<TreeNode*> stk;
+        TreeNode* curr = root;
+        TreeNode* lastVisited = nullptr;
+        
+        while (curr || !stk.empty()) {
+            while (curr) {
+                stk.push(curr);
+                curr = curr->left;
+            }
+            curr = stk.top();
+            
+            // 如果右子树为空 或 已访问过
+            if (!curr->right || curr->right == lastVisited) {
+                result.push_back(curr->val);
+                lastVisited = curr;
+                stk.pop();
+                curr = nullptr;  // 防止重复入左子树
+            } else {
+                curr = curr->right;
+            }
+        }
+        return result;
+    }
+};
