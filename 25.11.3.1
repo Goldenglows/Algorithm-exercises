@@ -1,0 +1,31 @@
+class Solution {
+public:
+    int minCost(string colors, vector<int>& neededTime) {
+        int n = colors.size();
+        int totalTime = 0;
+        int i = 0;
+
+        while (i < n) {
+            int maxInGroup = neededTime[i];  // 当前组最大值
+            int sumInGroup = neededTime[i];  // 当前组总和
+            int j = i + 1;
+
+            // 找到连续相同颜色的组
+            while (j < n && colors[j] == colors[i]) {
+                sumInGroup += neededTime[j];
+                maxInGroup = max(maxInGroup, neededTime[j]);
+                j++;
+            }
+
+            // 如果组长度 > 1，需要移除 (sum - max)
+            if (j - i > 1) {
+                totalTime += (sumInGroup - maxInGroup);
+            }
+
+            // 跳到下一组
+            i++;
+        }
+
+        return totalTime;
+    }
+};
