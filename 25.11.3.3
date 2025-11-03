@@ -1,0 +1,67 @@
+class Solution {
+public:
+    vector<int> preorderTraversal(TreeNode* root) {
+        vector<int> result;
+        preorder(root, result);
+        return result;
+    }
+private:
+    void preorder(TreeNode* node, vector<int>& res) {
+        if (!node) return;
+        res.push_back(node->val);
+        preorder(node->left, res);
+        preorder(node->right, res);
+    }
+};
+
+class Solution {
+public:
+    vector<int> preorderTraversal(TreeNode* root) {
+        vector<int> result;
+        if (!root) return result;
+        
+        stack<TreeNode*> stk;
+        stk.push(root);
+        
+        while (!stk.empty()) {
+            TreeNode* node = stk.top(); stk.pop();
+            result.push_back(node->val);
+            
+            // 先压右，后压左 → 出栈时先左后右
+            if (node->right) stk.push(node->right);
+            if (node->left)  stk.push(node->left);
+        }
+        return result;
+    }
+};
+
+class Solution {
+public:
+    vector<int> preorderTraversal(TreeNode* root) {
+        vector<int> result;
+        TreeNode* curr = root;
+        TreeNode* pre = nullptr;
+
+        while (curr) {
+            if (!curr->left) {
+                result.push_back(curr->val);
+                curr = curr->right;
+            } else {
+                pre = curr->left;
+                while (pre->right && pre->right != curr) {
+                    pre = pre->right;
+                }
+                if (!pre->right) {
+                    // 第一次访问：访问根节点
+                    result.push_back(curr->val);
+                    pre->right = curr;
+                    curr = curr->left;
+                } else {
+                    pre->right = nullptr;
+                    curr = curr->right;
+                }
+            }
+        }
+        return result;
+    }
+};
