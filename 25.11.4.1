@@ -1,0 +1,23 @@
+class Solution {
+public:
+    /**
+     * 找出两个重复的“顽皮数字”
+     * @param nums 包含 n+2 个元素的数组，有两个数字各出现两次
+     * @return 返回这两个重复数字
+     */
+    vector<int> getSneakyNumbers(vector<int>& nums) {
+        unordered_map<int, int> count;  // 哈希表：记录每个数字出现次数
+        vector<int> result;             // 存储答案：两个重复的数字
+        
+        // 遍历数组
+        for (int num : nums) {
+            if (count[num]) {
+                result.push_back(num);  // 重复数字，加入答案
+            } else {
+                count[num] = 1;         // 第一次见，标记
+            }
+        }
+        
+        return result;  // 返回 [重复数字1, 重复数字2]
+    }
+};
