@@ -1,0 +1,60 @@
+class Solution {
+public:
+    string mergeAlternately(string word1, string word2) {
+        string result;           // 结果字符串
+        int i = 0, j = 0;        // 双指针
+        
+        // 交替合并，直到任一字符串结束
+        while (i < word1.size() && j < word2.size()) {
+            result += word1[i++];  // 先加 word1
+            result += word2[j++];  // 再加 word2
+        }
+        
+        // 追加剩余部分
+        result += word1.substr(i);  // word1 剩余
+        result += word2.substr(j);  // word2 剩余
+        
+        return result;
+    }
+};
+
+class Solution {
+public:
+    char findTheDifference(string s, string t) {
+        char xor_sum = 0;
+        
+        // 先异或 s 的所有字符
+        for (char c : s) {
+            xor_sum ^= c;
+        }
+        
+        // 再异或 t 的所有字符
+        for (char c : t) {
+            xor_sum ^= c;
+        }
+        
+        return xor_sum;  // 结果就是多出的字符
+    }
+};
+
+class Solution {
+public:
+    char findTheDifference(string s, string t) {
+        vector<int> count(26, 0);
+        
+        // 统计 s 中每个字符出现次数
+        for (char c : s) {
+            count[c - 'a']++;
+        }
+        
+        // 减去 t 中的字符
+        for (char c : t) {
+            count[c - 'a']--;
+            if (count[c - 'a'] < 0) {
+                return c;  // 发现负数，说明这个是多出来的
+            }
+        }
+        
+        return ' '; // 不会执行（题目保证有解）
+    }
+};
