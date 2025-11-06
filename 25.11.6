@@ -1,0 +1,64 @@
+#include <bits/stdc++.h>
+using namespace std;
+
+/* ---------- Union-Find ---------- */
+struct UnionFind {
+    vector<int> parent;
+    explicit UnionFind(int n) : parent(n + 1) {
+        for (int i = 1; i <= n; ++i) parent[i] = i;
+    }
+    int find(int x) {
+        return parent[x] == x ? x : parent[x] = find(parent[x]);
+    }
+    void unite(int x, int y) {
+        int rx = find(x), ry = find(y);
+        if (rx != ry) parent[rx] = ry;
+    }
+};
+
+/* ---------- Solution ---------- */
+class Solution {
+public:
+    vector<int> processQueries(int c,
+                               vector<vector<int>>& connections,
+                               vector<vector<int>>& queries) {
+        UnionFind uf(c);
+
+        /* 1. 预处理所有电缆，得到每个电站所属的电网（根） */
+        for (auto& e : connections) {
+            uf.unite(e[0], e[1]);
+        }
+
+        /* 2. 为每个电网维护一个 set<int> 保存当前在线的电站 ID */
+        unordered_map<int, set<int>> online;   // root -> {online stations}
+        for (int i = 1; i <= c; ++i) {
+            online[uf.find(i)].insert(i);
+        }
+
+        /* 3. 处理查询 */
+        vector<int> ans;
+        set<int> offline;          // 全局离线的电站（防止重复离线）
+
+        for (auto& q : queries) {
+            int type = q[0], x = q[1];
+
+            if (type == 2) {                     // [2, x] 离线
+                if (offline.count(x)) continue; // 已经离线
+                offline.insert(x);
+                int root = uf.find(x);
+                online[root].erase(x);
+            } else {                             // [1, x] 查询
+                int root = uf.find(x);
+                auto& s = online[root];
+                if (s.empty()) {
+                    ans.push_back(-1);
+                } else if (s.count(x)) {
+                    ans.push_back(x);            // x 本身在线
+                } else {
+                    ans.push_back(*s.begin());  // 同一电网最小在线 ID
+                }
+            }
+        }
+        return ans;
+    }
+};
