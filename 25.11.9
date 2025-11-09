@@ -1,0 +1,26 @@
+#include <cstdint> // 为了使用 int64_t
+
+class Solution {
+public:
+    int countOperations(int num1, int num2) {
+        // 将输入转换为 int64_t，防止大整数溢出
+        int64_t n1 = num1, n2 = num2;
+        // 操作计数器，初始化为0
+        int operations = 0;
+        
+        // 当 num1 和 num2 都不为0时继续循环
+        while (n1 != 0 && n2 != 0) {
+            // 如果 num1 >= num2，用 num1 减 num2
+            if (n1 >= n2) {
+                n1 -= n2; // 更新 num1
+            } else {
+                n2 -= n1; // 否则用 num2 减 num1
+            }
+            // 每次减法操作后，计数加1
+            operations++;
+        }
+        
+        // 返回总操作次数
+        return operations;
+    }
+};
