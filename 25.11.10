@@ -1,0 +1,37 @@
+class Solution {
+public:
+    int minimumOperations(vector<int>& nums) {
+        int n = nums.size();
+        int ops = 0;
+        
+        // 从大到小处理每个值
+        for (int val = *max_element(nums.begin(), nums.end()); val > 0; --val) {
+            bool has_val = false;
+            int i = 0;
+            while (i < n) {
+                if (nums[i] == val) {
+                    has_val = true;
+                    // 找到一个 val，开始一个区间
+                    int j = i;
+                    while (j < n && nums[j] >= val) {
+                        j++;
+                    }
+                    // [i, j-1] 是可以清除 val 的区间
+                    // 执行操作：清除所有 val
+                    for (int k = i; k < j; ++k) {
+                        if (nums[k] == val) {
+                            nums[k] = 0;
+                        }
+                    }
+                    ops++;
+                    i = j;
+                } else {
+                    i++;
+                }
+            }
+            if (!has_val) continue;
+        }
+        
+        return ops;
+    }
+};
