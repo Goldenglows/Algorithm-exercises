@@ -1,0 +1,25 @@
+25.11.11
+class Solution {
+public:
+    int findMaxForm(vector<string>& strs, int m, int n) {
+        // dp[j][k]：最多 j 个0 和 k 个1 能选的最大字符串数
+        vector<vector<int>> dp(m + 1, vector<int>(n + 1, 0));
+        
+        for (string& s : strs) {
+            int zero = 0, one = 0;
+            for (char c : s) {
+                if (c == '0') zero++;
+                else one++;
+            }
+            
+            // 倒序遍历：避免覆盖
+            for (int j = m; j >= zero; --j) {
+                for (int k = n; k >= one; --k) {
+                    dp[j][k] = max(dp[j][k], dp[j - zero][k - one] + 1);
+                }
+            }
+        }
+        
+        return dp[m][n];
+    }
+};
