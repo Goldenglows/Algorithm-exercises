@@ -1,0 +1,411 @@
+
+using System.Collections.Generic;
+using UnityEngine;
+using TMPro;
+using System.Collections;
+using System.Linq;
+using DG.Tweening;
+
+public class CardEnter : MonoBehaviour
+{
+    // ====== 主卡牌和提示引用 ======
+    public List<SpriteRenderer> listPokers;
+    public List<TMP_Text> listTips;
+
+    // ====== 动画参数设置 (Animation Settings) ======
+    [Header("主卡牌动画参数")]
+    [Tooltip("每张卡牌飞入动画的持续时间（秒）。")]
+    public float animationDuration = 2f; // 动画持续时间
+
+    [Tooltip("卡牌初始位置（屏幕外）相对于目标位置的 Y 轴偏移量。")]
+    public Vector3 startOffset = new Vector3(0, 15f, 0); // 起始偏移量（start Offset）
+
+    [Tooltip("各批次入场之间的时间间隔（秒）。")]
+    public float batchDelay = 0.1f; // 批次延迟（batch Delay）
+
+    // ====== 左侧/右侧/回撤 UI 引用和参数 ======
+    [Header("左侧/右侧/回撤 UI 引用")]
+    [Tooltip("左侧牌区 8 张牌 (1L-8L) 的 SpriteRenderer 列表。")]
+    public List<SpriteRenderer> listLeftPokers;
+
+    [Tooltip("弃牌区的那张牌的 SpriteRenderer。")]
+    public SpriteRenderer discardCard;
+
+    [Tooltip("回撤按钮的 Transform。最好挂载 CanvasGroup 用于淡入。")]
+    public Transform recallButton;
+
+    [Header("左侧牌区动画参数")]
+    [Tooltip("左侧牌区堆叠的起始位置锚点。X 坐标必须设置为 -1.85，Y 坐标为 -2.733531。")]
+    public Vector3 leftStackStartPosition;
+
+    [Tooltip("左侧牌区每张牌的 X 轴偏移量 (0.5)。")]
+    public float leftCardXOffset = 0.5f;
+
+    [Tooltip("左侧/弃牌区入场动画的持续时间（0.5s 左右）。")]
+    public float leftAnimationDuration = 0.5f;
+
+    [Tooltip("回撤按钮淡入的延迟时间（入场动画完成后等待时间）。")]
+    public float recallButtonFadeDelay = 0.3f;
+
+    // ====== 私有内部变量（Private Internal Variables） ======
+    [HideInInspector]
+    public int cardLength;
+
+    private Vector3[] targetPositions = new Vector3[18]; // 存储卡牌 1~17 的最终目标位置（target Positions），索引 0 留空
+
+    private void Awake()
+    {
+        // 初始化卡牌数量
+        cardLength = listPokers.Count;
+
+        // 预处理：记录目标位置并设置卡牌的起始状态
+        RecordAndHideCards();
+
+        // --- 新增的初始化调用 ---
+        InitializeLeftArea();
+        InitializeDiscardArea();
+        InitializeRecallButton();
+        // ----------------------
+    }
+
+    private void Start()
+    {
+        // 游戏开始时，启动入场动画序列
+        StartEnterAnimationSequence();
+    }
+
+    // ===================================
+    // III. 辅助定位函数 (Helper Functions)
+    // ===================================
+
+    /// <summary>
+    /// 计算左侧牌 (1L-8L) 的最终目标位置。
+    /// </summary>
+    private Vector3 GetLeftPokerTargetPosition(int index)
+    {
+        // Y 坐标使用用户指定的精确值
+        const float FIXED_TARGET_Y = -4f;
+
+        // 依赖 Inspector 设置 leftStackStartPosition.x = -1.85f 作为起始点
+        float startX = leftStackStartPosition.x;
+        float targetZ = leftStackStartPosition.z;
+
+        float targetX = startX + index * leftCardXOffset;
+
+        return new Vector3(targetX, FIXED_TARGET_Y, targetZ);
+    }
+
+    /// <summary>
+    /// 计算弃牌区卡牌的最终目标位置。
+    /// </summary>
+    private Vector3 GetDiscardTargetPosition()
+    {
+        // 使用用户指定的精确坐标
+        const float FIXED_TARGET_X = 2.52847f;
+        const float FIXED_TARGET_Y = -4f;
+
+        // Z 轴使用左侧牌区的 Z 轴（保持在同一深度平面）
+        float targetZ = leftStackStartPosition.z;
+
+        return new Vector3(FIXED_TARGET_X, FIXED_TARGET_Y, targetZ);
+    }
+
+    // ===================================
+    // I. 初始化函数 (Initialization)
+    // ===================================
+
+    /// <summary>
+    /// 记录每张卡牌的最终位置，并将其瞬移到屏幕外的起始点。
+    /// </summary>
+    private void RecordAndHideCards()
+    {
+        // Pass 1: 记录目标位置并计算平均 X, Z 坐标
+        float sumX = 0f;
+        float sumZ = 0f;
+        for (int i = 0; i < listPokers.Count; i++)
+        {
+            int cardIndex = i + 1;
+            // 记录卡牌的最终位置
+            targetPositions[cardIndex] = listPokers[i].transform.position;
+            sumX += targetPositions[cardIndex].x;
+            sumZ += targetPositions[cardIndex].z;
+        }
+
+        if (cardLength == 0) return;
+
+        // 计算中心点坐标：所有目标位置的平均 X 和 Z
+        float avgX = sumX / cardLength;
+        float avgZ = sumZ / cardLength;
+
+        // 定义统一的起始位置：中心 X/Z + 高度 Y (startOffset.y)
+        Vector3 centralEntryPosition = new Vector3(avgX, targetPositions[1].y + startOffset.y, avgZ);
+
+        // Pass 2: 设置卡牌的起始状态
+        for (int i = 0; i < listPokers.Count; i++)
+        {
+            Transform cardTransform = listPokers[i].transform;
+
+            // 1. 设置起始位置：所有卡牌都从统一的中心点入场
+            cardTransform.position = centralEntryPosition;
+
+            // 2. 初始旋转：X轴 90度, Y轴 90度（牌背朝上）
+            cardTransform.localEulerAngles = new Vector3(90f, 90f, 0f);
+
+            // 3. 初始透明度设为 0
+            listPokers[i].color = new Color(1, 1, 1, 0);
+        }
+    }
+
+    /// <summary>
+    /// 初始化左侧牌区 (1L-8L) 的错位堆叠目标位置，并设置本地起始位置和透明度。
+    /// </summary>
+    private void InitializeLeftArea()
+    {
+        if (listLeftPokers == null || listLeftPokers.Count == 0) return;
+
+        for (int i = 0; i < listLeftPokers.Count; i++)
+        {
+            Transform cardTransform = listLeftPokers[i].transform;
+
+            // 获取精确的本地目标位置 (targetPos)
+            Vector3 targetPos = GetLeftPokerTargetPosition(i);
+
+            // 1. 计算本地起始位置：本地目标位置 - (0, 10f, 0)
+            Vector3 startPosLocal = targetPos - new Vector3(0, 10f, 0);
+            // 使用 localPosition 设置起始点
+            cardTransform.localPosition = startPosLocal;
+
+            // 2. 初始旋转和透明度
+            cardTransform.localEulerAngles = Vector3.zero;
+            listLeftPokers[i].color = new Color(1, 1, 1, 0);
+        }
+    }
+
+    /// <summary>
+    /// 初始化弃牌区卡牌的目标位置并设置本地起始位置和透明度。
+    /// </summary>
+    private void InitializeDiscardArea()
+    {
+        if (discardCard == null) return;
+
+        Transform discardTransform = discardCard.transform;
+
+        // 获取精确的本地目标位置 (targetPos)
+        Vector3 targetPos = GetDiscardTargetPosition();
+
+        // 1. 计算本地起始位置
+        Vector3 startPosLocal = targetPos - new Vector3(0, 10f, 0);
+        // 使用 localPosition 设置起始点
+        discardTransform.localPosition = startPosLocal;
+
+        // 2. 初始旋转和透明度
+        discardTransform.localEulerAngles = Vector3.zero;
+        discardCard.color = new Color(1, 1, 1, 0);
+    }
+    /// <summary>
+    /// 初始化回撤按钮：将其设置为完全透明。
+    /// </summary>
+    private void InitializeRecallButton()
+    {
+        if (recallButton == null) return;
+
+        CanvasGroup cg = recallButton.GetComponent<CanvasGroup>();
+        if (cg != null)
+        {
+            cg.alpha = 0f;
+        }
+    }
+
+    // ===================================
+    // II. 动画函数 (Animation)
+    // ===================================
+
+    /// <summary>
+    /// 为指定的单张卡牌创建【自定义多轴旋转入场】动画。
+    /// </summary>
+    private Tween CreateCardTween(int cardIndex, float duration)
+    {
+        Transform cardTransform = listPokers[cardIndex - 1].transform;
+        SpriteRenderer cardRenderer = listPokers[cardIndex - 1];
+        Vector3 targetPos = targetPositions[cardIndex];
+
+        float totalDuration = duration;
+
+        Sequence cardSequence = DOTween.Sequence();
+
+        // 1. 移动动画：卡片慢速从上方/远处移动到最终落位
+        Tween moveTween = cardTransform.DOMove(targetPos, totalDuration)
+                                         .SetEase(Ease.OutSine);
+
+        // 2. 多轴旋转动画：X轴抬起(90°->0°) 和 Y轴翻面(90°->0°)
+        // 目标旋转：X=0°, Y=0°, Z=0°
+        Tween finalRotate = cardTransform.DOLocalRotate(new Vector3(0f, 0f, 0f), totalDuration, RotateMode.Fast)
+                                            .SetEase(Ease.InOutQuad);
+
+        // 3. 淡入动画：卡片缓慢淡入
+        Tween fadeTween = cardRenderer.DOFade(1f, totalDuration * 0.5f);
+
+        // 将所有独立的动画添加到 Sequence 中，并使用 Join() 确保它们同时开始执行
+        cardSequence.Append(moveTween);
+        cardSequence.Join(finalRotate);
+        cardSequence.Join(fadeTween);
+
+        return cardSequence;
+    }
+
+    /// <summary>
+    /// 创建左侧牌区 (1L-8L) 的连续堆叠入场动画序列。
+    /// 效果：使用负数间隔实现高度重叠的紧凑入场。
+    /// </summary>
+    private Sequence AnimateLeftArea()
+    {
+        Sequence leftSequence = DOTween.Sequence();
+        if (listLeftPokers == null || listLeftPokers.Count == 0) return leftSequence;
+
+        // 定义负数间隔。我们希望每张牌的动画之间只有 0.1s 的间隔。
+        float aggressiveOverlapLeft = -(leftAnimationDuration - 0.1f);
+
+        for (int i = 0; i < listLeftPokers.Count; i++)
+        {
+            Transform cardTransform = listLeftPokers[i].transform;
+            SpriteRenderer cardRenderer = listLeftPokers[i];
+
+            // 1. 获取精确的本地目标位置
+            Vector3 targetPos = GetLeftPokerTargetPosition(i);
+
+            // 2. 移动 Tween: 使用 DOLocalMove 移动到精确的本地目标位置
+            Tween moveTween = cardTransform.DOLocalMove(targetPos, leftAnimationDuration)
+                                           .SetEase(Ease.OutBack);
+
+            // 3. 淡入 Tween
+            Tween fadeTween = cardRenderer.DOFade(1f, leftAnimationDuration * 0.5f);
+
+            // 4. 将移动和淡入同步
+            Sequence cardEntry = DOTween.Sequence()
+                                        .Append(moveTween)
+                                        .Join(fadeTween);
+
+            // 5. 将每张牌的动画加入主序列
+            leftSequence.Append(cardEntry);
+
+            // 6. 应用负数间隔，除了最后一张牌
+            if (i < listLeftPokers.Count - 1)
+            {
+                leftSequence.AppendInterval(aggressiveOverlapLeft);
+            }
+        }
+
+        return leftSequence;
+    }
+    /// <summary>
+    /// 创建弃牌区卡牌的入场动画。
+    /// </summary>
+    private Tween AnimateDiscardArea()
+    {
+        if (discardCard == null) return DOTween.Sequence();
+
+        Transform discardTransform = discardCard.transform;
+
+        // 获取精确的本地目标位置
+        Vector3 targetPos = GetDiscardTargetPosition();
+
+        // 弃牌区卡牌入场: 使用 DOLocalMove
+        Tween moveTween = discardTransform.DOLocalMove(targetPos, leftAnimationDuration)
+                                          .SetEase(Ease.OutBack);
+
+        // 淡入
+        Tween fadeTween = discardCard.DOFade(1f, leftAnimationDuration * 0.5f);
+
+        // 加入 Sequence 并返回
+        return DOTween.Sequence().Append(moveTween).Join(fadeTween);
+    }
+    /// <summary>
+    /// 创建回撤按钮的淡入动画。
+    /// </summary>
+    private Tween AnimateRecallButton()
+    {
+        if (recallButton == null) return DOTween.Sequence();
+
+        CanvasGroup cg = recallButton.GetComponent<CanvasGroup>();
+        if (cg != null)
+        {
+            // 使用 CanvasGroup 淡入
+            return cg.DOFade(1f, 0.3f);
+        }
+        else
+        {
+            Debug.LogError("回撤按钮上缺少 CanvasGroup 组件，淡入效果可能失败！");
+            return DOTween.Sequence();
+        }
+    }
+
+    /// <summary>
+    /// 启动卡牌入场动画的 DOTween 序列。
+    /// </summary>
+    private void StartEnterAnimationSequence()
+    {
+        Sequence enterSequence = DOTween.Sequence();
+
+        // 定义负数间隔。
+        float aggressiveOverlap = -(animationDuration - 0.3f);
+
+        // --- 批次 1: 1 ---
+        enterSequence.Append(CreateCardTween(1, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+
+        // --- 批次 2: 7 ---
+        enterSequence.Append(CreateCardTween(7, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+
+        // --- 批次 3: (2, 8) ---
+        enterSequence.Append(CreateCardTween(2, animationDuration)).Join(CreateCardTween(8, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+
+        // --- 批次 4: (3, 9) ---
+        enterSequence.Append(CreateCardTween(3, animationDuration)).Join(CreateCardTween(9, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+
+        // --- 批次 5 至 8: 底部 8 张牌 (两两配对) ---
+        int[] leftSide = { 10, 11, 12, 13 };
+        int[] rightSide = { 14, 15, 16, 17 };
+
+        for (int i = 0; i < leftSide.Length; i++)
+        {
+            enterSequence.Append(CreateCardTween(leftSide[i], animationDuration))
+                         .Join(CreateCardTween(rightSide[i], animationDuration));
+            enterSequence.AppendInterval(aggressiveOverlap);
+        }
+
+        // --- 批次 9: 4 ---
+        enterSequence.Append(CreateCardTween(4, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+
+        // --- 批次 10: 5 ---
+        enterSequence.Append(CreateCardTween(5, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+
+        // --- 批次 11: 6 (最后一张牌不需要间隔) ---
+        enterSequence.Append(CreateCardTween(6, animationDuration));
+
+        // **新增 UI 元素入场动画**
+
+        // --- 批次 12: 左侧牌堆 (1L-8L) 连续入场 ---
+        enterSequence.AppendInterval(0.8f); // 等待 17 张牌完全落位，留出 0.8s 间隔
+        enterSequence.Append(AnimateLeftArea());
+
+        // --- 批次 13: 弃牌区 (右侧牌) 入场 ---
+        enterSequence.AppendInterval(0.3f); // 等待左侧牌堆序列完成后，再等待 0.3s
+        enterSequence.Append(AnimateDiscardArea());
+
+        // --- 批次 14: 回撤按钮淡入 ---
+        enterSequence.AppendInterval(recallButtonFadeDelay); // 等待 recallButtonFadeDelay (0.3s)
+        enterSequence.Append(AnimateRecallButton());
+
+        enterSequence.OnComplete(() =>
+        {
+            Debug.Log("所有 UI 元素入场动画序列完成！现在可以开始交互操作。");
+        });
+    }
+
+}
+
