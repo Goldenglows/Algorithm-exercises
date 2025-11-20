@@ -1,0 +1,268 @@
+using System.Collections.Generic;
+using UnityEngine;
+using DG.Tweening;
+
+public class CardInteractionManager : MonoBehaviour
+{
+    // ====== 引用和参数 ======
+    public Transform rightHandTargetArea; // 弃牌区基准位置
+    public Transform recallButton;
+    public float interactionDuration = 0.4f;
+
+    // 堆叠 Z 轴偏移量（卡牌 Z 轴增加或减少，实现堆叠）
+    private const float STACK_Z_OFFSET = 0.05f;
+
+    // 状态堆栈：记录被移动/弃置的卡牌，用于回撤
+    private Stack<CardData> discardStack = new Stack<CardData>();
+
+    // 逻辑层级计数
+    private int topLayerCount = 0;
+    private int middleLayerCount = 0;
+
+    // 左手牌堆逻辑列表，用于检查顶层卡牌
+    private List<CardData> leftStackCards = new List<CardData>();
+    public Vector3 discardWorldBasePosition = new Vector3(2.52847f, -4f, 0f);
+    // ================== 初始化逻辑 ==================
+
+    void Start()
+    {
+        // 初始化所有 CardData
+        CardData[] allCards = FindObjectsOfType<CardData>();
+
+        foreach (CardData card in allCards)
+        {
+            card.RecordInitialState(); // 记录回撤位置
+
+            card.transform.localScale = Vector3.one;
+
+            if (card.type == CardType.FieldCard)
+            {
+                if (card.layer == FieldLayer.Top) topLayerCount++;
+                else if (card.layer == FieldLayer.Middle) middleLayerCount++;
+            }
+            else if (card.type == CardType.LeftHandCard)
+            {
+                leftStackCards.Add(card);
+            }
+        }
+
+        // 按 stackIndex 排序，确保列表末尾是堆顶卡牌
+        leftStackCards.Sort((a, b) => a.stackIndex.CompareTo(b.stackIndex));
+    }
+
+    // ================== 点击处理 ==================
+
+    void Update()
+    {
+        if (Input.GetMouseButtonDown(0))
+        {
+            HandleClick();
+        }
+    }
+
+    private void HandleClick()
+    {
+        // 1. 物理检测：Raycast 确保点击的是最顶层卡牌
+        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+        RaycastHit hit;
+
+        if (Physics.Raycast(ray, out hit))
+        {
+            CardData card = hit.collider.GetComponent<CardData>();
+
+            if (card != null)
+            {
+                // 2. 逻辑检测：检查卡牌是否符合分层或堆叠规则
+                if (IsCardClickable(card))
+                {
+                    MoveCardToRightHand(card);
+                }
+            }
+            else if (hit.transform == recallButton)
+            {
+                // 只有在左手牌堆和场内牌都清空后，才能回撤
+                if (discardStack.Count > 0)
+                {
+                    RecallLastCard();
+                }
+            }
+        }
+    }
+
+    private bool IsCardClickable(CardData card)
+    {
+        // 1. 物理检查：如果碰撞体被禁用（已被清除），则不可点
+        if (!card.GetComponent<Collider>().enabled) return false;
+
+        if (card.type == CardType.FieldCard)
+        {
+            // 场内牌逻辑：检查所有阻挡牌是否已被清除（即碰撞体是否已禁用）
+            foreach (CardData blocker in card.BlockerCards)
+            {
+                // 如果任何阻挡牌的碰撞体仍然激活，说明该牌被阻挡，不可点击
+                if (blocker.GetComponent<Collider>().enabled)
+                {
+                    return false;
+                }
+            }
+            // 所有阻挡牌都已清除，该牌可点击
+            return true;
+        }
+        else if (card.type == CardType.LeftHandCard)
+        {
+            // 左手牌逻辑：堆叠顶层依赖 (保持不变)
+            if (leftStackCards.Count == 0) return false;
+            return card == leftStackCards[leftStackCards.Count - 1];
+        }
+
+        return false;
+    }
+
+    private void MoveCardToRightHand(CardData card)
+    {
+        // 逻辑检查：如果不可点击，则直接返回
+        if (!IsCardClickable(card))
+        {
+            return;
+        }
+
+        // --- 1. 坐标转换和堆叠位置计算 ---
+
+        // 获取卡牌的父对象
+        Transform cardParent = card.transform.parent;
+
+        // 将世界目标坐标 (Inspector中设置的固定值) 转换成卡牌父对象的本地坐标
+        Vector3 targetBaseLocalPos;
+        if (cardParent != null)
+        {
+            // InverseTransformPoint 将世界坐标转换成卡牌父对象的本地坐标
+            targetBaseLocalPos = cardParent.InverseTransformPoint(discardWorldBasePosition);
+        }
+        else
+        {
+            // 如果卡牌没有父对象，则本地坐标即世界坐标
+            targetBaseLocalPos = discardWorldBasePosition;
+        }
+
+        // Z 轴和 Sorting Order 的同步计算
+        int currentStackCount = discardStack.Count;
+
+        // 计算动态堆叠 Z (本地 Z)。正值 (STACK_Z_OFFSET) 确保新牌靠近摄像机
+        float newZ = targetBaseLocalPos.z + (currentStackCount * STACK_Z_OFFSET);
+
+        Vector3 dynamicTargetLocalPos = new Vector3(
+            targetBaseLocalPos.x,
+            targetBaseLocalPos.y,
+            newZ
+        );
+
+        // --- 2. 动画和状态更新 ---
+
+        // 确保 SpriteRenderer 的 Sorting Order 始终高于前一张牌，解决堆叠混乱问题
+        SpriteRenderer cardRenderer = card.GetComponent<SpriteRenderer>();
+        if (cardRenderer != null)
+        {
+            cardRenderer.sortingOrder = currentStackCount;
+            // 动画前先设置透明度为 1 (如果之前是半透明状态)
+            cardRenderer.DOFade(1f, 0.1f);
+        }
+
+        if (card.type == CardType.FieldCard)
+        {
+            AnimateFieldToDiscard(card.transform, dynamicTargetLocalPos);
+        }
+        else if (card.type == CardType.LeftHandCard)
+        {
+            AnimateLeftToDiscard(card.transform, dynamicTargetLocalPos);
+
+            // 移除堆顶卡牌 (LeftHandCard 堆叠逻辑)
+            if (leftStackCards.Count > 0)
+            {
+                leftStackCards.RemoveAt(leftStackCards.Count - 1);
+            }
+        }
+
+        // 3. 禁用碰撞体，表示该牌已被清除，不再阻挡下层牌
+        Collider cardCollider = card.GetComponent<Collider>();
+        if (cardCollider != null)
+        {
+            cardCollider.enabled = false;
+        }
+
+        // 4. 推入回撤堆栈
+        discardStack.Push(card);
+    }
+    private void AnimateFieldToDiscard(Transform cardTransform, Vector3 targetLocalPos)
+    {
+        cardTransform.DOLocalMove(targetLocalPos, interactionDuration)
+                     .SetEase(Ease.InOutSine)
+                     .OnComplete(() => {
+                         // 解决大小变小的问题：强制本地缩放为 1
+                         cardTransform.localScale = Vector3.one;
+                     });
+    }
+
+    /// <summary>
+    /// 【左手牌区】动画：翻面+平移到弃牌堆。
+    /// </summary>
+    private void AnimateLeftToDiscard(Transform cardTransform, Vector3 targetLocalPos)
+    {
+        Sequence flipAndMove = DOTween.Sequence();
+
+        // 1. 翻转动画 (绕 Y 轴旋转 180 度)
+        flipAndMove.Append(cardTransform.DORotate(new Vector3(0, 180f, 0), interactionDuration * 0.5f, RotateMode.Fast))
+                   .SetEase(Ease.Linear);
+
+        // 2. 平移到堆叠位置 (同时进行)
+        flipAndMove.Join(cardTransform.DOLocalMove(targetLocalPos, interactionDuration)
+                                      .SetEase(Ease.InOutSine));
+
+        flipAndMove.OnComplete(() =>
+        {
+            // 动画结束后，将旋转重置回 0（正面朝上），但 Z 轴已经改变
+            cardTransform.localRotation = Quaternion.identity;
+            cardTransform.localScale = Vector3.one;
+        });
+
+        
+    }
+    private void RecallLastCard()
+    {
+        if (discardStack.Count == 0) return;
+
+        CardData cardToRecall = discardStack.Pop();
+        Transform cardTransform = cardToRecall.transform;
+
+        // 目标位置和旋转
+        Vector3 endLocalPos = cardToRecall.initialLocalPosition;
+        Quaternion endLocalRot = cardToRecall.initialLocalRotation;
+
+        // 1. 恢复碰撞体，使其可再次交互
+        cardToRecall.GetComponent<Collider>().enabled = true;
+
+        // 2. 反向移动
+        cardTransform.DOLocalMove(endLocalPos, interactionDuration)
+                     .SetEase(Ease.OutBack);
+
+        // 3. 反向旋转
+        if (cardToRecall.type == CardType.LeftHandCard)
+        {
+            // 左手牌反向翻转 (从 180 度转回初始旋转)
+            cardTransform.DOLocalRotate(endLocalRot.eulerAngles, interactionDuration, RotateMode.Fast);
+
+            // 恢复左手牌逻辑堆叠状态
+            leftStackCards.Add(cardToRecall);
+            leftStackCards.Sort((a, b) => a.stackIndex.CompareTo(b.stackIndex)); // 确保回堆后顺序正确
+        }
+        else if (cardToRecall.type == CardType.FieldCard)
+        {
+            cardTransform.DOScale(1f, interactionDuration); // 恢复大小
+            // 恢复场内牌计数
+            if (cardToRecall.layer == FieldLayer.Top) topLayerCount++;
+            else if (cardToRecall.layer == FieldLayer.Middle) middleLayerCount++;
+        }
+
+        // 4. 如果您之前使用了淡入淡出，记得恢复透明度。
+        cardTransform.GetComponent<SpriteRenderer>().DOFade(1f, 0.2f);
+    }
+}
