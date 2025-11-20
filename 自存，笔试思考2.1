@@ -1,0 +1,332 @@
+using System.Collections.Generic;
+using UnityEngine;
+using TMPro;
+using System.Linq;
+using DG.Tweening;
+
+public class CardEnter : MonoBehaviour
+{
+    public List<SpriteRenderer> listPokers;
+    public List<TMP_Text> listTips;
+
+    [Header("主卡牌动画参数")]
+    public float animationDuration = 2f;
+    public Vector3 startOffset = new Vector3(0, 15f, 0);
+    public float batchDelay = 0.1f; // 未直接使用，但保留
+
+    [Header("左侧/弃牌区 UI")]
+    public List<SpriteRenderer> listLeftPokers;
+    public SpriteRenderer discardCard;
+    public Transform recallButton;
+
+    [Header("左侧牌区参数")]
+    [Tooltip("左侧牌堆的本地起始锚点（1L卡牌的位置）。")]
+    public Vector3 leftStackStartPosition;
+    public float leftCardXOffset = 0.5f;
+    public float leftAnimationDuration = 0.5f;
+    public float recallButtonFadeDelay = 0.3f;
+
+    [Header("缩放补偿参数")]
+    public const float COMPENSATION_SCALE = 1.3f; // 缩放因子
+    [Tooltip("Y轴补偿位移。需要手动调整以抵消放大 1.3 倍造成的下沉。")]
+    public float Y_COMPENSATION_OFFSET = 0.0f; // 初始设为 0
+
+    [HideInInspector]
+    public int cardLength;
+    private Vector3[] targetPositions = new Vector3[18];
+
+    private void Awake()
+    {
+        cardLength = listPokers.Count;
+        RecordAndHideCards();
+        InitializeLeftArea();
+        InitializeDiscardArea();
+        InitializeRecallButton();
+    }
+
+    private void Start()
+    {
+        StartEnterAnimationSequence();
+    }
+
+    /// <summary>
+    /// 计算左侧牌 (1L-8L) 的本地目标位置（Y轴为-4f）。
+    /// </summary>
+    private Vector3 GetLeftPokerTargetPosition(int index)
+    {
+        const float FIXED_TARGET_Y = -4f;
+        float startX = leftStackStartPosition.x;
+        float targetZ = leftStackStartPosition.z;
+        float targetX = startX + index * leftCardXOffset;
+        return new Vector3(targetX, FIXED_TARGET_Y, targetZ);
+    }
+
+    /// <summary>
+    /// 计算弃牌区卡牌的本地目标位置（Y轴为-4f）。
+    /// </summary>
+    private Vector3 GetDiscardTargetPosition()
+    {
+        const float FIXED_TARGET_X = 2.52847f;
+        const float FIXED_TARGET_Y = -4f;
+        float targetZ = leftStackStartPosition.z;
+        return new Vector3(FIXED_TARGET_X, FIXED_TARGET_Y, targetZ);
+    }
+
+    /// <summary>
+    /// 记录主卡牌目标位置并瞬移到屏幕外起始点。
+    /// </summary>
+    private void RecordAndHideCards()
+    {
+        float sumX = 0f;
+        float sumZ = 0f;
+        for (int i = 0; i < listPokers.Count; i++)
+        {
+            targetPositions[i + 1] = listPokers[i].transform.position;
+            sumX += targetPositions[i + 1].x;
+            sumZ += targetPositions[i + 1].z;
+        }
+
+        if (cardLength == 0) return;
+        float avgX = sumX / cardLength;
+        float avgZ = sumZ / cardLength;
+        Vector3 centralEntryPosition = new Vector3(avgX, targetPositions[1].y + startOffset.y, avgZ);
+
+        for (int i = 0; i < listPokers.Count; i++)
+        {
+            Transform cardTransform = listPokers[i].transform;
+            cardTransform.position = centralEntryPosition;
+            cardTransform.localEulerAngles = new Vector3(90f, 90f, 0f);
+            listPokers[i].color = new Color(1, 1, 1, 0);
+        }
+    }
+
+    /// <summary>
+    /// 初始化左侧牌区的本地起始位置和状态。
+    /// </summary>
+    private void InitializeLeftArea()
+    {
+        if (listLeftPokers == null || listLeftPokers.Count == 0) return;
+
+        // 使用公共常量
+        const float SCALE_FACTOR = COMPENSATION_SCALE;
+
+        for (int i = 0; i < listLeftPokers.Count; i++)
+        {
+            Transform cardTransform = listLeftPokers[i].transform;
+
+            // 1. 应用缩放补偿
+            cardTransform.localScale = Vector3.one * SCALE_FACTOR;
+
+            Vector3 targetPos = GetLeftPokerTargetPosition(i);
+
+            // 2. 【关键修改】：Y轴位置补偿
+            // 目标 Y 位置 = 原始目标 Y + Y_COMPENSATION_OFFSET
+            targetPos.y += Y_COMPENSATION_OFFSET;
+
+            Vector3 startPosLocal = targetPos - new Vector3(0, 10f, 0); // 从新补偿后的目标位置计算起始点
+
+            cardTransform.localPosition = startPosLocal; // 使用 localPosition 
+            cardTransform.localEulerAngles = Vector3.zero;
+
+            // 设置透明度
+            listLeftPokers[i].color = new Color(1, 1, 1, 0);
+        }
+    }
+
+    /// <summary>
+    /// 初始化弃牌区卡牌的本地起始位置和状态。
+    /// </summary>
+    private void InitializeDiscardArea()
+    {
+        if (discardCard == null) return;
+
+        Transform discardTransform = discardCard.transform;
+
+        // 【补偿缩放因子】：如果卡牌因为父对象继承而缩小了 1.3 倍，我们将其放大 1.3 倍。
+        const float COMPENSATION_SCALE = 1.3f;
+
+        // 【关键修改】：应用 1.3 倍的缩放补偿
+        discardTransform.localScale = Vector3.one * COMPENSATION_SCALE;
+
+        Vector3 targetPos = GetDiscardTargetPosition();
+        Vector3 startPosLocal = targetPos - new Vector3(0, 10f, 0);
+
+        discardTransform.localPosition = startPosLocal; // 使用 localPosition
+        discardTransform.localEulerAngles = Vector3.zero;
+
+        // 使用 SpriteRenderer 设置透明度
+        SpriteRenderer renderer = discardCard.GetComponent<SpriteRenderer>();
+        if (renderer != null)
+        {
+            renderer.color = new Color(1, 1, 1, 0); // 设置透明度为 0
+        }
+    }
+
+    /// <summary>
+    /// 初始化回撤按钮：将其设置为完全透明，并禁用其对象。
+    /// </summary>
+    private void InitializeRecallButton()
+    {
+        if (recallButton == null) return;
+
+        CanvasGroup cg = recallButton.GetComponent<CanvasGroup>();
+        if (cg != null)
+        {
+            cg.alpha = 0f;
+            cg.interactable = false;
+            cg.blocksRaycasts = false;
+        }
+
+        // 【关键修改】：强制禁用整个对象，确保它不会被渲染
+        recallButton.gameObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// 创建主卡牌的入场动画 (DOMove)。
+    /// </summary>
+    private Tween CreateCardTween(int cardIndex, float duration)
+    {
+        Transform cardTransform = listPokers[cardIndex - 1].transform;
+        SpriteRenderer cardRenderer = listPokers[cardIndex - 1];
+        Vector3 targetPos = targetPositions[cardIndex];
+
+        Sequence cardSequence = DOTween.Sequence();
+
+        Tween moveTween = cardTransform.DOMove(targetPos, duration).SetEase(Ease.OutSine);
+        Tween finalRotate = cardTransform.DOLocalRotate(new Vector3(0f, 0f, 0f), duration, RotateMode.Fast).SetEase(Ease.InOutQuad);
+        Tween fadeTween = cardRenderer.DOFade(1f, duration * 0.5f);
+
+        cardSequence.Append(moveTween);
+        cardSequence.Join(finalRotate);
+        cardSequence.Join(fadeTween);
+
+        return cardSequence;
+    }
+
+    /// <summary>
+    /// 创建左侧牌区的连续堆叠入场动画 (DOLocalMove)。
+    /// </summary>
+    private Sequence AnimateLeftArea()
+    {
+        Sequence leftSequence = DOTween.Sequence();
+        if (listLeftPokers == null || listLeftPokers.Count == 0) return leftSequence;
+
+        float aggressiveOverlapLeft = -(leftAnimationDuration - 0.1f);
+
+        for (int i = 0; i < listLeftPokers.Count; i++)
+        {
+            Transform cardTransform = listLeftPokers[i].transform;
+            SpriteRenderer cardRenderer = listLeftPokers[i];
+            Vector3 targetPos = GetLeftPokerTargetPosition(i);
+
+            Tween moveTween = cardTransform.DOLocalMove(targetPos, leftAnimationDuration).SetEase(Ease.OutBack);
+            Tween fadeTween = cardRenderer.DOFade(1f, leftAnimationDuration * 0.5f);
+
+            Sequence cardEntry = DOTween.Sequence().Append(moveTween).Join(fadeTween);
+
+            leftSequence.Append(cardEntry);
+
+            if (i < listLeftPokers.Count - 1)
+            {
+                leftSequence.AppendInterval(aggressiveOverlapLeft);
+            }
+        }
+
+        return leftSequence;
+    }
+
+    /// <summary>
+    /// 创建弃牌区卡牌的入场动画 (DOLocalMove)。
+    /// </summary>
+    private Tween AnimateDiscardArea()
+    {
+        if (discardCard == null) return DOTween.Sequence();
+
+        Transform discardTransform = discardCard.transform;
+        Vector3 targetPos = GetDiscardTargetPosition();
+
+        Tween moveTween = discardTransform.DOLocalMove(targetPos, leftAnimationDuration).SetEase(Ease.OutBack);
+        Tween fadeTween = discardCard.DOFade(1f, leftAnimationDuration * 0.5f);
+
+        return DOTween.Sequence().Append(moveTween).Join(fadeTween);
+    }
+    
+    /// <summary>
+    /// 创建回撤按钮的淡入动画。
+    /// </summary>
+    private Tween AnimateRecallButton()
+    {
+        if (recallButton == null) return DOTween.Sequence();
+
+        CanvasGroup cg = recallButton.GetComponent<CanvasGroup>();
+        if (cg != null)
+        {
+            // 【关键修改】：在淡入之前，先激活对象
+            recallButton.gameObject.SetActive(true);
+
+            // 动画开始前，确保交互性关闭
+            cg.interactable = false;
+            cg.blocksRaycasts = false;
+
+            // 使用 CanvasGroup 淡入
+            return cg.DOFade(1f, 0.3f)
+                     .OnComplete(() => {
+                         // 动画完成后，启用交互和射线阻挡
+                         cg.interactable = true;
+                         cg.blocksRaycasts = true;
+                     });
+        }
+        else
+        {
+            Debug.LogError("回撤按钮上缺少 CanvasGroup 组件，淡入效果可能失败！");
+            return DOTween.Sequence();
+        }
+    }
+
+    /// <summary>
+    /// 启动所有卡牌和 UI 元素的入场动画序列。
+    /// </summary>
+    private void StartEnterAnimationSequence()
+    {
+        Sequence enterSequence = DOTween.Sequence();
+        float aggressiveOverlap = -(animationDuration - 0.3f);
+
+        // 主卡牌入场序列 (1 -> 7 -> (2, 8) -> ...)
+        enterSequence.Append(CreateCardTween(1, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+        enterSequence.Append(CreateCardTween(7, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+        enterSequence.Append(CreateCardTween(2, animationDuration)).Join(CreateCardTween(8, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+        enterSequence.Append(CreateCardTween(3, animationDuration)).Join(CreateCardTween(9, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+
+        int[] leftSide = { 10, 11, 12, 13 };
+        int[] rightSide = { 14, 15, 16, 17 };
+        for (int i = 0; i < leftSide.Length; i++)
+        {
+            enterSequence.Append(CreateCardTween(leftSide[i], animationDuration)).Join(CreateCardTween(rightSide[i], animationDuration));
+            enterSequence.AppendInterval(aggressiveOverlap);
+        }
+
+        enterSequence.Append(CreateCardTween(4, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+        enterSequence.Append(CreateCardTween(5, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+        enterSequence.Append(CreateCardTween(6, animationDuration));
+
+        // UI 元素入场序列
+        enterSequence.AppendInterval(0.8f);
+        enterSequence.Append(AnimateLeftArea());
+        enterSequence.AppendInterval(0.3f);
+        enterSequence.Append(AnimateDiscardArea());
+        enterSequence.AppendInterval(recallButtonFadeDelay);
+        enterSequence.Append(AnimateRecallButton());
+
+        enterSequence.OnComplete(() =>
+        {
+            Debug.Log("所有 UI 元素入场动画序列完成！现在可以开始交互操作。");
+        });
+    }
+
+}
