@@ -1,0 +1,637 @@
+using System.Collections.Generic;
+using UnityEngine;
+using DG.Tweening;
+using TMPro;
+
+public class CardInteractionManager : MonoBehaviour
+{
+    // 引用和参数
+    [SerializeField] private Transform recallButton;
+    [SerializeField] private float interactionDuration = 0.3f;
+
+    [Tooltip("弃牌堆的基准世界坐标。")]
+    [SerializeField] private Vector3 discardWorldBasePosition;
+
+    private const float STACK_Z_OFFSET = 0.05f;
+
+    private static bool interactionEnabled = false;
+    public static bool InteractionEnabled
+    {
+        get { return interactionEnabled; }
+        set { interactionEnabled = value; }
+    }
+
+    private Stack<CardData> discardStack = new Stack<CardData>();
+    private List<CardData> leftStackCards = new List<CardData>();
+
+    private CardEnter cardEnter;
+
+    void Awake()
+    {
+        cardEnter = FindObjectOfType<CardEnter>();
+    }
+
+    void Start()
+    {
+        CardData[] allCards = FindObjectsOfType<CardData>();
+
+        foreach (CardData card in allCards)
+        {
+            Collider cardCollider = card.GetComponent<Collider>();
+            if (cardCollider != null) cardCollider.enabled = false;
+
+            if (card.type == CardType.LeftHandCard)
+            {
+                leftStackCards.Add(card);
+            }
+        }
+
+        leftStackCards.Sort((a, b) => a.stackIndex.CompareTo(b.stackIndex));
+
+        foreach (CardData card in allCards)
+        {
+            if (card.type == CardType.FieldCard)
+            {
+                card.GetComponent<Collider>()!.enabled = true;
+            }
+        }
+
+        if (leftStackCards.Count > 0)
+        {
+            leftStackCards[^1].GetComponent<Collider>()!.enabled = true;
+        }
+    }
+
+    // 检测鼠标点击。
+    void Update()
+    {
+        if (Input.GetMouseButtonDown(0))
+        {
+            HandleClick();
+        }
+    }
+
+    // 处理鼠标点击事件。
+    private void HandleClick()
+    {
+        if (!interactionEnabled) return;
+
+        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+        if (Physics.Raycast(ray, out RaycastHit hit))
+        {
+            CardData card = hit.collider.GetComponent<CardData>();
+
+            if (card != null && IsCardClickable(card))
+            {
+                MoveCardToRightHand(card);
+            }
+            else if (hit.transform == recallButton && discardStack.Count > 0)
+            {
+                RecallLastCard();
+            }
+        }
+    }
+
+    // 判断卡牌是否可点击。
+    private bool IsCardClickable(CardData card)
+    {
+        Collider cardCollider = card.GetComponent<Collider>();
+        if (cardCollider == null || !cardCollider.enabled) return false;
+
+        if (card.type == CardType.FieldCard)
+        {
+            // 检查阻挡牌是否已被清除
+            foreach (CardData blocker in card.BlockerCards)
+            {
+                if (blocker.GetComponent<Collider>()!.enabled) return false;
+            }
+            return true;
+        }
+        else if (card.type == CardType.LeftHandCard)
+        {
+            // 只有左手牌堆的顶层卡牌可点击
+            return card == leftStackCards[^1];
+        }
+
+        return false;
+    }
+
+    // 将点击的卡牌移动到弃牌堆。
+    private void MoveCardToRightHand(CardData card)
+    {
+        if (!IsCardClickable(card)) return;
+
+        TMP_Text clickedCardTip = null;
+        if (card.HasTip)  // 只有场内牌才有 Tip
+        {
+            clickedCardTip = cardEnter?.GetTipByIndex(card.ListIndex);
+        }
+
+        // 隐藏前一张弃牌的 Tip
+        if (discardStack.Count > 0)
+        {
+            CardData prevCard = discardStack.Peek();
+            TMP_Text prevCardTip = (cardEnter != null) ? cardEnter.GetTipByIndex(prevCard.ListIndex) : null;
+            prevCardTip?.gameObject.SetActive(false);
+        }
+
+        // 计算弃牌堆的动态本地目标位置
+        Transform cardParent = card.transform.parent;
+        Vector3 targetBaseLocalPos = (cardParent != null) ?
+                                     cardParent.InverseTransformPoint(discardWorldBasePosition) :
+                                     discardWorldBasePosition;
+
+        int currentStackCount = discardStack.Count;
+        float newZ = targetBaseLocalPos.z + (currentStackCount * STACK_Z_OFFSET);
+        Vector3 dynamicTargetLocalPos = new Vector3(targetBaseLocalPos.x, targetBaseLocalPos.y, newZ);
+
+        // 设置渲染层级和淡入
+        SpriteRenderer cardRenderer = card.GetComponent<SpriteRenderer>();
+        if (cardRenderer != null)
+        {
+            cardRenderer.sortingOrder = 50 + currentStackCount;
+            cardRenderer.DOFade(1f, 0.1f);
+        }
+
+        // 移动 Tip 文本
+        if (clickedCardTip != null)
+        {
+            clickedCardTip.gameObject.SetActive(true);
+            //Vector3 tipTargetLocalPos = dynamicTargetLocalPos;
+            //tipTargetLocalPos.z += 0.01f;
+            //clickedCardTip.transform.DOLocalMove(tipTargetLocalPos, interactionDuration).SetEase(Ease.InOutSine);
+            clickedCardTip.DOFade(1f, 0.1f);
+        }
+
+        if (card.type == CardType.FieldCard)
+        {
+            AnimateFieldToDiscard(card.transform, dynamicTargetLocalPos);
+        }
+        else if (card.type == CardType.LeftHandCard)
+        {
+            AnimateLeftToDiscard(card.transform, dynamicTargetLocalPos);
+            leftStackCards.RemoveAt(leftStackCards.Count - 1);
+        }
+
+        // 禁用碰撞体并入栈
+        card.GetComponent<Collider>()!.enabled = false;
+        discardStack.Push(card);
+
+        if (card.type == CardType.LeftHandCard && leftStackCards.Count > 0)
+        {
+            leftStackCards[^1].GetComponent<Collider>()!.enabled = true;
+        }
+    }
+
+    // 播放场内牌移动到弃牌堆的动画。
+    private void AnimateFieldToDiscard(Transform cardTransform, Vector3 targetLocalPos)
+    {
+        cardTransform.DOLocalMove(targetLocalPos, interactionDuration).SetEase(Ease.InOutSine);
+    }
+
+    // 播放左手牌移动到弃牌堆的动画（带翻转）。
+    private void AnimateLeftToDiscard(Transform cardTransform, Vector3 targetLocalPos)
+    {
+        Sequence flipAndMove = DOTween.Sequence();
+        float halfDuration = interactionDuration * 0.5f;
+
+        Tween finalRotate = cardTransform.DOLocalRotate(new Vector3(0, 180f, 0), halfDuration, RotateMode.Fast).SetEase(Ease.InOutQuad);
+
+        flipAndMove.Append(cardTransform.DOLocalMove(targetLocalPos, interactionDuration).SetEase(Ease.InOutSine));
+        flipAndMove.Join(finalRotate);
+    }
+
+    // 回撤弃牌堆中最后一张卡牌。
+    private void RecallLastCard()
+    {
+        if (discardStack.Count == 0 || cardEnter == null) return;
+
+        CardData cardToRecall = discardStack.Pop();
+        Transform cardTransform = cardToRecall.transform;
+        Vector3 endLocalPos = cardToRecall.initialLocalPosition;
+
+        cardToRecall.GetComponent<Collider>()!.enabled = true;
+
+        // 隐藏回撤卡牌的 Tip
+        TMP_Text recalledTip = null;
+        if (cardToRecall.HasTip)  // 只有场内牌才有 Tip
+        {
+            recalledTip = cardEnter?.GetTipByIndex(cardToRecall.ListIndex);
+        }
+        //recalledTip?.gameObject.SetActive(false);
+
+        // 显示新的顶层 Tip
+        if (discardStack.Count > 0)
+        {
+            CardData newTopCard = discardStack.Peek();
+            TMP_Text newTopTip = cardEnter.GetTipByIndex(newTopCard.ListIndex);
+
+            if (newTopTip != null && newTopTip.gameObject.activeSelf == false)
+            {
+                newTopTip.gameObject.SetActive(true);
+                newTopTip.DOFade(1f, 0.1f);
+            }
+        }
+
+        Sequence recallSequence = DOTween.Sequence();
+
+        // 移动回初始位置
+        recallSequence.Append(
+            cardTransform.DOLocalMove(endLocalPos, interactionDuration).SetEase(Ease.OutBack)
+        );
+
+        if (cardToRecall.type == CardType.LeftHandCard)
+        {
+            // 恢复旋转
+            Tween reverseRotate = cardTransform.DOLocalRotate(Vector3.zero, interactionDuration, RotateMode.Fast).SetEase(Ease.OutSine);
+            recallSequence.Join(reverseRotate);
+
+            // 恢复到左手牌列表的精确位置
+            int insertionIndex = leftStackCards.Count;
+            for (int i = 0; i < leftStackCards.Count; i++)
+            {
+                if (leftStackCards[i].stackIndex > cardToRecall.stackIndex)
+                {
+                    insertionIndex = i;
+                    break;
+                }
+            }
+            leftStackCards.Insert(insertionIndex, cardToRecall);
+        }
+
+        // 恢复原始的 Sprite Sorting Order 和淡入
+        SpriteRenderer cardRenderer = cardTransform.GetComponent<SpriteRenderer>();
+        if (cardRenderer != null)
+        {
+            cardRenderer.sortingOrder = cardToRecall.initialSortingOrder;
+            cardRenderer.DOFade(1f, 0.2f);
+        }
+    }
+}
+
+using UnityEngine;
+using System.Collections.Generic;
+
+// 卡牌类型
+public enum CardType
+{
+    FieldCard, // 场内牌
+    LeftHandCard, // 左手牌区
+}
+
+// 场内牌的逻辑层级
+public enum FieldLayer
+{
+    Top,
+    Middle,
+    Bottom,
+}
+
+public class CardData : MonoBehaviour
+{
+    // 属性
+    [SerializeField] public CardType type;
+    [SerializeField] public FieldLayer layer;
+    [SerializeField] public int stackIndex;
+    [SerializeField] public List<CardData> BlockerCards = new List<CardData>();
+
+    // Tip 关联
+    [SerializeField] private int listIndex;
+    public int ListIndex => listIndex;
+
+    public bool HasTip => type == CardType.FieldCard;
+
+    [HideInInspector] public Vector3 initialLocalPosition;
+    [HideInInspector] public Quaternion initialLocalRotation;
+    [HideInInspector] public int initialSortingOrder;
+
+    void Awake()
+    {
+        // 保持为空
+    }
+
+    // 记录卡牌的最终稳定状态。
+    public void FinalizeInitialState()
+    {
+        initialLocalPosition = transform.localPosition;
+        initialLocalRotation = transform.localRotation;
+        SpriteRenderer sr = GetComponent<SpriteRenderer>();
+        if (sr != null)
+        {
+            initialSortingOrder = sr.sortingOrder;
+        }
+    }
+}
+
+using System.Collections.Generic;
+using UnityEngine;
+using DG.Tweening;
+using TMPro;
+
+public class CardEnter : MonoBehaviour
+{
+    // 引用
+    [SerializeField] private List<SpriteRenderer> listPokers;
+    [SerializeField] private List<TMP_Text> listTips;
+    [SerializeField] private List<SpriteRenderer> listLeftPokers;
+    [SerializeField] private SpriteRenderer discardCard;
+    [SerializeField] private Transform recallButton;
+
+    // 参数
+    [SerializeField] private float animationDuration;
+    [SerializeField] private Vector3 startOffset;
+    [SerializeField] private Vector3 leftStackStartPosition;
+    [SerializeField] private float leftCardXOffset;
+    [SerializeField] private float leftAnimationDuration;
+    [SerializeField] private float recallButtonFadeDelay;
+
+    private Vector3[] targetPositions = new Vector3[18];
+    private List<CardData> allCardData = new List<CardData>();
+
+    void Awake()
+    {
+        // 禁用交互
+        CardInteractionManager.InteractionEnabled = false;
+
+        RecordAndHideCards();
+        InitializeLeftArea();
+        InitializeDiscardArea();
+        InitializeRecallButton();
+
+        // 移除 HideAllTips()，根据要求 Tip 入场后保持可见
+    }
+
+    void Start()
+    {
+        CollectAllCardData();
+        StartEnterAnimationSequence();
+    }
+
+    // 根据索引获取 Tip。
+    public TMP_Text GetTipByIndex(int index)
+    {
+        return (index >= 0 && index < listTips.Count) ? listTips[index] : null;
+    }
+
+    // 收集所有 CardData 组件。
+    private void CollectAllCardData()
+    {
+        foreach (SpriteRenderer sr in listPokers)
+        {
+            CardData cd = sr.GetComponent<CardData>();
+            if (cd != null) allCardData.Add(cd);
+        }
+        foreach (SpriteRenderer sr in listLeftPokers)
+        {
+            CardData cd = sr.GetComponent<CardData>();
+            if (cd != null) allCardData.Add(cd);
+        }
+        if (discardCard != null)
+        {
+            CardData cd = discardCard.GetComponent<CardData>();
+            if (cd != null) allCardData.Add(cd);
+        }
+    }
+
+    // 计算弃牌区卡牌的本地目标位置。
+    private Vector3 GetDiscardTargetPosition()
+    {
+        const float FIXED_TARGET_X = 1.97f;
+        const float FIXED_TARGET_Y = -4.1f;
+        float targetZ = leftStackStartPosition.z;
+        return new Vector3(FIXED_TARGET_X, FIXED_TARGET_Y, targetZ);
+    }
+
+    // 计算左侧牌的本地目标位置。
+    private Vector3 GetLeftPokerTargetPosition(int index, Transform cardTransform)
+    {
+        float fixedTargetY = GetDiscardTargetPosition().y;
+        float targetX = leftStackStartPosition.x + index * leftCardXOffset;
+        float targetZ = 0f;
+        return new Vector3(targetX, fixedTargetY, targetZ);
+    }
+
+    // 记录主卡牌目标位置并隐藏。
+    private void RecordAndHideCards()
+    {
+        float sumX = 0f;
+
+        for (int i = 0; i < listPokers.Count; i++)
+        {
+            targetPositions[i + 1] = listPokers[i].transform.position;
+            sumX += targetPositions[i + 1].x;
+        }
+
+        int cardLength = listPokers.Count;
+        if (cardLength == 0) return;
+
+        float avgX = sumX / cardLength;
+        float baseSceneY = listPokers[0].transform.position.y;
+        Vector3 centralEntryPosition = new Vector3(avgX, baseSceneY + startOffset.y, 0f);
+
+        for (int i = 0; i < listPokers.Count; i++)
+        {
+            Transform cardTransform = listPokers[i].transform;
+            cardTransform.position = centralEntryPosition;
+            cardTransform.localEulerAngles = new Vector3(90f, 90f, 0f);
+            listPokers[i].color = new Color(1, 1, 1, 0);
+        }
+    }
+
+    // 初始化左侧牌区。
+    private void InitializeLeftArea()
+    {
+        if (listLeftPokers == null || listLeftPokers.Count == 0) return;
+        const float INITIAL_Y_OFFSET = 5f;
+
+        for (int i = 0; i < listLeftPokers.Count; i++)
+        {
+            Transform cardTransform = listLeftPokers[i].transform;
+            Vector3 targetPos = GetLeftPokerTargetPosition(i, cardTransform);
+            Vector3 startPosLocal = targetPos - new Vector3(0, INITIAL_Y_OFFSET, 0);
+
+            cardTransform.localPosition = startPosLocal;
+            cardTransform.localEulerAngles = Vector3.zero;
+            listLeftPokers[i].color = new Color(1, 1, 1, 0);
+        }
+    }
+
+    // 初始化弃牌区。
+    private void InitializeDiscardArea()
+    {
+        if (discardCard == null) return;
+        const float INITIAL_Y_OFFSET = 5f;
+
+        Transform discardTransform = discardCard.transform;
+        Vector3 targetPos = GetDiscardTargetPosition();
+        Vector3 startPosLocal = targetPos - new Vector3(0, INITIAL_Y_OFFSET, 0);
+
+        discardTransform.localPosition = startPosLocal;
+        discardTransform.localEulerAngles = Vector3.zero;
+        discardCard.color = new Color(1, 1, 1, 0);
+    }
+
+    // 初始化回撤按钮。
+    private void InitializeRecallButton()
+    {
+        if (recallButton == null) return;
+
+        SpriteRenderer sr = recallButton.GetComponent<SpriteRenderer>();
+        Collider col = recallButton.GetComponent<Collider>();
+
+        if (sr != null)
+        {
+            sr.color = new Color(sr.color.r, sr.color.g, sr.color.b, 0f);
+        }
+
+        if (col != null)
+        {
+            col.enabled = false;
+        }
+
+        recallButton.gameObject.SetActive(true);
+    }
+
+    // 创建单张主卡牌的入场动画。
+    private Tween CreateCardTween(int cardIndex, float duration)
+    {
+        // 索引修正：targetPositions 从 1 开始，listPokers 从 0 开始
+        Transform cardTransform = listPokers[cardIndex - 1].transform;
+        SpriteRenderer cardRenderer = listPokers[cardIndex - 1];
+        Vector3 targetPos = targetPositions[cardIndex];
+
+        targetPos.z = cardTransform.position.z;
+
+        Sequence cardSequence = DOTween.Sequence();
+        Tween moveTween = cardTransform.DOMove(targetPos, duration).SetEase(Ease.OutSine);
+        Tween finalRotate = cardTransform.DOLocalRotate(Vector3.zero, duration, RotateMode.Fast).SetEase(Ease.InOutQuad);
+        Tween fadeTween = cardRenderer.DOFade(1f, duration * 0.5f);
+
+        cardSequence.Append(moveTween);
+        cardSequence.Join(finalRotate);
+        cardSequence.Join(fadeTween);
+
+        return cardSequence;
+    }
+
+    // 创建左侧牌区的连续堆叠入场动画。
+    private Sequence AnimateLeftArea()
+    {
+        Sequence leftSequence = DOTween.Sequence();
+        if (listLeftPokers == null || listLeftPokers.Count == 0) return leftSequence;
+
+        float aggressiveOverlapLeft = -(leftAnimationDuration - 0.1f);
+
+        for (int i = 0; i < listLeftPokers.Count; i++)
+        {
+            Transform cardTransform = listLeftPokers[i].transform;
+            SpriteRenderer cardRenderer = listLeftPokers[i];
+            Vector3 targetPos = GetLeftPokerTargetPosition(i, cardTransform);
+
+            Tween moveTween = cardTransform.DOLocalMove(targetPos, leftAnimationDuration).SetEase(Ease.OutBack);
+            Tween fadeTween = cardRenderer.DOFade(1f, leftAnimationDuration * 0.5f);
+
+            Sequence cardEntry = DOTween.Sequence().Append(moveTween).Join(fadeTween);
+
+            leftSequence.Append(cardEntry);
+
+            if (i < listLeftPokers.Count - 1)
+            {
+                leftSequence.AppendInterval(aggressiveOverlapLeft);
+            }
+        }
+
+        return leftSequence;
+    }
+
+    // 创建弃牌区卡牌的入场动画。
+    private Tween AnimateDiscardArea()
+    {
+        if (discardCard == null) return DOTween.Sequence();
+
+        Transform discardTransform = discardCard.transform;
+        Vector3 targetPos = GetDiscardTargetPosition();
+
+        Tween moveTween = discardTransform.DOLocalMove(targetPos, leftAnimationDuration).SetEase(Ease.OutBack);
+        Tween fadeTween = discardCard.DOFade(1f, leftAnimationDuration * 0.5f);
+
+        return DOTween.Sequence().Append(moveTween).Join(fadeTween);
+    }
+
+    // 创建回撤按钮的淡入动画，并启用碰撞体
+    private Tween AnimateRecallButton()
+    {
+        if (recallButton == null) return DOTween.Sequence();
+
+        SpriteRenderer sr = recallButton.GetComponent<SpriteRenderer>();
+        Collider col = recallButton.GetComponent<Collider>();
+
+        if (sr != null)
+        {
+            Tween fadeTween = sr.DOFade(1f, 0.3f);
+
+            fadeTween.OnComplete(() =>
+            {
+                if (col != null)
+                {
+                    col.enabled = true;
+                }
+            });
+
+            return fadeTween;
+        }
+
+        return DOTween.Sequence();
+    }
+
+    // 启动所有卡牌和 UI 元素的入场动画序列。
+    private void StartEnterAnimationSequence()
+    {
+        Sequence enterSequence = DOTween.Sequence();
+        float aggressiveOverlap = -(animationDuration - 0.3f);
+
+
+        enterSequence.Append(CreateCardTween(1, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+        enterSequence.Append(CreateCardTween(7, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+        enterSequence.Append(CreateCardTween(2, animationDuration)).Join(CreateCardTween(8, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+        enterSequence.Append(CreateCardTween(3, animationDuration)).Join(CreateCardTween(9, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+
+        int[] leftSide = { 10, 11, 12, 13 };
+        int[] rightSide = { 14, 15, 16, 17 };
+        for (int i = 0; i < leftSide.Length; i++)
+        {
+            enterSequence.Append(CreateCardTween(leftSide[i], animationDuration)).Join(CreateCardTween(rightSide[i], animationDuration));
+            enterSequence.AppendInterval(aggressiveOverlap);
+        }
+
+        enterSequence.Append(CreateCardTween(4, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+        enterSequence.Append(CreateCardTween(5, animationDuration));
+        enterSequence.AppendInterval(aggressiveOverlap);
+        enterSequence.Append(CreateCardTween(6, animationDuration));
+
+        // UI 元素入场序列
+        enterSequence.AppendInterval(0.8f);
+        enterSequence.Append(AnimateLeftArea());
+        enterSequence.AppendInterval(0.3f);
+        enterSequence.Append(AnimateDiscardArea());
+        enterSequence.AppendInterval(recallButtonFadeDelay);
+        enterSequence.Append(AnimateRecallButton());
+
+        enterSequence.OnComplete(() =>
+        {
+            // 记录卡牌的最终稳定状态和 Sorting Order
+            foreach (CardData card in allCardData)
+            {
+                card.FinalizeInitialState();
+            }
+
+            // 动画结束后，启用交互
+            CardInteractionManager.InteractionEnabled = true;
+        });
+    }
+}
