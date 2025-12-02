@@ -1,0 +1,21 @@
+static void Main()
+{
+    int age = 0;
+    bool isCheck = true;
+
+    for (; isCheck;)
+    {
+        try
+        {
+            Console.WriteLine("please input your age:");
+            string ageStr = Console.ReadLine();
+            isCheck = false;
+        }
+        catch 
+        {
+            Console.WriteLine("your age is not a number!");
+        }
+    }
+
+
+}
